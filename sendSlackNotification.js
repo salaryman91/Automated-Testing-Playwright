@@ -8,7 +8,7 @@ const SLACK_BOT_TOKEN = process.env.SLACK_BOT_TOKEN;
 const SLACK_CHANNEL_ID = process.env.SLACK_CHANNEL_ID;
 const slackClient = new WebClient(SLACK_BOT_TOKEN);
 
-// Slack 채널 검증
+// Slack 채널 검증 함수
 async function validateChannel() {
   try {
     const res = await slackClient.conversations.info({
@@ -22,7 +22,7 @@ async function validateChannel() {
   }
 }
 
-// 스크린샷 파일 업로드
+// 스크린샷 파일 업로드 함수
 async function uploadScreenshot(filePath) {
   try {
     // 파일 경로가 존재하지 않으면 절대 경로로 변환
@@ -63,7 +63,25 @@ async function uploadScreenshot(filePath) {
   }
 }
 
-// 테스트 결과를 Slack으로 전송
+// 재귀적으로 스크린샷 파일을 찾는 함수
+// test-results 폴더 내의 하위 폴더(예: 실패 테스트 이름으로 생성된 폴더)에서도 .png 파일을 찾아 반환합니다.
+function findScreenshotFiles(dir) {
+  let results = [];
+  if (!fs.existsSync(dir)) return results;
+  const list = fs.readdirSync(dir);
+  for (const file of list) {
+    const filePath = path.join(dir, file);
+    const stat = fs.statSync(filePath);
+    if (stat && stat.isDirectory()) {
+      results = results.concat(findScreenshotFiles(filePath));
+    } else if (file.toLowerCase().endsWith('.png')) {
+      results.push(filePath);
+    }
+  }
+  return results;
+}
+
+// 테스트 결과를 Slack으로 전송하는 메인 함수
 async function main() {
   try {
     console.log('🚀 Slack 알림 시스템 시작');
@@ -80,23 +98,22 @@ async function main() {
     }
     const results = JSON.parse(fs.readFileSync(reportFilePath, 'utf-8'));
 
-    // 테스트 결과 통계
+    // 테스트 결과 통계 계산
     const totalTests = (results.stats.expected || 0) + (results.stats.unexpected || 0);
     const passed = results.stats.expected || 0;
     const failed = results.stats.unexpected || 0;
 
     let failedTestsDetails = [];
-    let screenshotPaths = [];
 
-    // 실패한 테스트 케이스 수집 (재귀 함수)
-    function collectFailedTests(suite, results) {
+    // 재귀적으로 실패한 테스트 케이스 제목을 수집하는 함수
+    function collectFailedTests(suite, resultsArr) {
       if (suite.tests) {
         suite.tests.forEach(test => {
           if (test.status === 'failed' || test.status === 'unexpected') {
             const title = Array.isArray(test.title) ? test.title.join(' ▶ ') : test.title;
-            results.push(`- ${title}`);
+            resultsArr.push(`- ${title}`);
           }
-          if (test.suites) collectFailedTests(test, results); // 재귀 호출
+          if (test.suites) collectFailedTests(test, resultsArr);
         });
       }
     }
@@ -119,6 +136,10 @@ async function main() {
       text: message,
       mrkdwn: true,
     });
+
+    // test-results 디렉토리에서 스크린샷 파일 경로를 수집합니다.
+    const screenshotsDir = path.join(process.env.GITHUB_WORKSPACE, 'test-results');
+    const screenshotPaths = findScreenshotFiles(screenshotsDir);
 
     // 실패한 테스트의 스크린샷 업로드
     if (failed > 0 && screenshotPaths.length > 0) {
