@@ -1,6 +1,6 @@
 import { test, expect, Page } from '@playwright/test';
 
-test.describe('네이버 접속 테스트', () => {
+test.describe('naver access test', () => {
   test.beforeEach(async ({ page }: { page: Page }) => {
     await page.goto('https://www.naver.com');
   });
