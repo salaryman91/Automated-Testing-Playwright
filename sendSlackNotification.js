@@ -42,31 +42,26 @@ async function uploadScreenshot(filePath) {
       length: fileContent.length,
     });
     if (!urlResponse.ok) throw new Error(`업로드 URL 요청 실패: ${urlResponse.error}`);
-    const path = require('path');
+
     const { upload_url, file_id } = urlResponse;
     await axios.post(upload_url, fileContent, {
       headers: { 'Content-Type': 'application/octet-stream' },
     });
-    const folderName = path.dirname(fileName);  // 폴더 이름 가져오기
+
     const completeResponse = await slackClient.files.completeUploadExternal({
-      files: [{ id: file_id, title: folderName }],
+      files: [{ id: file_id, title: fileName }],
       channel_id: SLACK_CHANNEL_ID,
-      initial_comment: `📸 실패 스크린샷: ${folderName}`,
+      initial_comment: `📸 실패 스크린샷: ${fileName}`,
     });
     if (!completeResponse.ok) throw new Error(`파일 처리 실패: ${completeResponse.error}`);
 
-    console.log(`✅ 업로드 성공: ${folderName}`);
+    console.log(`✅ 업로드 성공: ${fileName}`);
     return file_id;
   } catch (error) {
     console.error('❌ 업로드 실패:', error.message);
     throw error;
   }
 }
-
-
-
-
-
 
 // 재귀적으로 스크린샷 파일을 찾는 함수
 // test-results 폴더 내의 하위 폴더(예: 실패 테스트 이름으로 생성된 폴더)에서도 .png 파일을 찾아 반환합니다.
