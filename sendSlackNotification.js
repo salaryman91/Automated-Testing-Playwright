@@ -8,6 +8,22 @@ const SLACK_BOT_TOKEN = process.env.SLACK_BOT_TOKEN;
 const SLACK_CHANNEL_ID = process.env.SLACK_CHANNEL_ID;
 const slackClient = new WebClient(SLACK_BOT_TOKEN);
 
+// 스크린샷 파일명을 원하는 형식으로 단순화하는 함수
+function simplifyFileName(originalName) {
+  // 원래 파일명 예시: test-naver-access-test-fail-test-webkit-test-failed-1.png
+  // 원하는 형식: naver-access-test-fail-test-webkit.png
+  const regex = /^test-(.+?)-test-fail-test-(.+?)-test-failed-\d+(\.png)$/;
+  const match = originalName.match(regex);
+  if (match) {
+    const testDescription = match[1];  // 예: naver-access
+    const browserName = match[2];      // 예: webkit
+    const extension = match[3];        // .png
+    return `${testDescription}-test-fail-test-${browserName}${extension}`;
+  }
+  // 매칭되지 않으면 원본 반환
+  return originalName;
+}
+
 // Slack 채널 검증 함수
 async function validateChannel() {
   try {
@@ -32,15 +48,15 @@ async function uploadScreenshot(filePath) {
     if (!fs.existsSync(filePath)) throw new Error('파일이 존재하지 않음: ' + filePath);
 
     const fileContent = fs.readFileSync(filePath);
-    const parentFolder = path.basename(path.dirname(filePath));
-    const fileName = `${parentFolder}-${path.basename(filePath)}`;
+    // 기존 파일명에서 단순화된 파일명 생성
+    const originalBaseName = path.basename(filePath);
+    const simplifiedFileName = simplifyFileName(originalBaseName);
 
-
-    console.log(`📤 업로드 시도: ${fileName} (${(fileContent.length / 1024).toFixed(2)}KB)`);
+    console.log(`📤 업로드 시도: ${simplifiedFileName} (${(fileContent.length / 1024).toFixed(2)}KB)`);
 
     // Slack에 파일 업로드
     const urlResponse = await slackClient.files.getUploadURLExternal({
-      filename: fileName,
+      filename: simplifiedFileName,
       length: fileContent.length,
     });
     if (!urlResponse.ok) throw new Error(`업로드 URL 요청 실패: ${urlResponse.error}`);
@@ -51,13 +67,13 @@ async function uploadScreenshot(filePath) {
     });
 
     const completeResponse = await slackClient.files.completeUploadExternal({
-      files: [{ id: file_id, title: fileName }],
+      files: [{ id: file_id, title: simplifiedFileName }],
       channel_id: SLACK_CHANNEL_ID,
-      initial_comment: `📸 실패 스크린샷: ${fileName}`,
+      initial_comment: `📸 실패 스크린샷: ${simplifiedFileName}`,
     });
     if (!completeResponse.ok) throw new Error(`파일 처리 실패: ${completeResponse.error}`);
 
-    console.log(`✅ 업로드 성공: ${fileName}`);
+    console.log(`✅ 업로드 성공: ${simplifiedFileName}`);
     return file_id;
   } catch (error) {
     console.error('❌ 업로드 실패:', error.message);
