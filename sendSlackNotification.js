@@ -24,24 +24,16 @@ class SlackNotifier {
 
     const fileContent = fs.readFileSync(absolutePath);
 
-    // 파일 경로에서 정보 추출 개선
-    const pathParts = absolutePath.split(path.sep);
-    const testDirName = pathParts.find(part => part.startsWith('test-')) || '';
-
-    // 전체 경로에서 브라우저 정보 찾기
+    // 브라우저 정보 추출
     let browser = 'unknown';
     if (absolutePath.includes('chromium')) browser = 'chromium';
     else if (absolutePath.includes('firefox')) browser = 'firefox';
     else if (absolutePath.includes('webkit')) browser = 'webkit';
 
-    // 테스트 이름 추출 및 정리
-    const testName = testDirName
-      .replace(/^test-/, '') // 앞의 'test-' 제거
-      .split('-')
-      .filter(part => !['test', 'failed', '1', browser].includes(part)) // 불필요한 부분 제거
-      .join('-');
+    // 테스트 케이스 이름 추출 (fail_test 또는 pass_test)
+    const testCase = absolutePath.includes('fail_test') ? 'fail_test' : 'pass_test';
 
-    const fileName = `${testName}-${browser}.png`;
+    const fileName = `${testCase}-${browser}.png`;
 
     const { upload_url, file_id } = await this.client.files.getUploadURLExternal({
       filename: fileName,
