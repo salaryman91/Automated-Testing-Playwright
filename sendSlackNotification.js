@@ -21,8 +21,7 @@ async function validateChannel() {
     throw error;
   }
 }
-
-// 스크린샷 파일 업로드 함수
+// 스크린샷 파일 업로드 함수 (파일명 재가공 적용)
 async function uploadScreenshot(filePath) {
   try {
     // 파일 경로가 존재하지 않으면 절대 경로로 변환
@@ -32,8 +31,24 @@ async function uploadScreenshot(filePath) {
     if (!fs.existsSync(filePath)) throw new Error('파일이 존재하지 않음: ' + filePath);
 
     const fileContent = fs.readFileSync(filePath);
-    const parentFolder = path.basename(path.dirname(filePath));
-    const fileName = `${parentFolder}-${path.basename(filePath)}`;
+    const originalName = path.basename(filePath);
+    let fileName;
+
+    // "-test-" 구분자로 파일명을 분할합니다.
+    // 예) "test-naver-access-test-fail-test-firefox-test-failed-1.png"
+    // 분할 결과: ["test-naver-access", "fail", "firefox", "failed-1.png"]
+    const parts = originalName.split('-test-');
+    if (parts.length >= 4) {
+      // 첫 3개 조각을 결합 → "test-naver-access-test-fail-test-firefox"
+      fileName = parts.slice(0, 3).join('-test-') + ".png";
+      // 앞에 붙은 "test-" 접두어 제거 (옵션)
+      if (fileName.startsWith("test-")) {
+        fileName = fileName.substring(5);
+      }
+    } else {
+      // 패턴이 맞지 않으면 원본 파일명 사용
+      fileName = originalName;
+    }
 
     console.log(`📤 업로드 시도: ${fileName} (${(fileContent.length / 1024).toFixed(2)}KB)`);
 
