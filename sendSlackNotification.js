@@ -23,12 +23,24 @@ class SlackNotifier {
     if (!fs.existsSync(absolutePath)) throw new Error(`파일이 존재하지 않음: ${absolutePath}`);
 
     const fileContent = fs.readFileSync(absolutePath);
-    
-    // 파일명 간소화
-    const dirName = path.basename(path.dirname(absolutePath));
-    const origFileName = path.basename(absolutePath);
-    const browser = origFileName.match(/(chromium|firefox|webkit)/i)?.[0] || 'unknown';
-    const testName = dirName.split('-').slice(0, -1).join('-'); // 'test-' 접두사 제거
+
+    // 파일 경로에서 정보 추출 개선
+    const pathParts = absolutePath.split(path.sep);
+    const testDirName = pathParts.find(part => part.startsWith('test-')) || '';
+
+    // 전체 경로에서 브라우저 정보 찾기
+    let browser = 'unknown';
+    if (absolutePath.includes('chromium')) browser = 'chromium';
+    else if (absolutePath.includes('firefox')) browser = 'firefox';
+    else if (absolutePath.includes('webkit')) browser = 'webkit';
+
+    // 테스트 이름 추출 및 정리
+    const testName = testDirName
+      .replace(/^test-/, '') // 앞의 'test-' 제거
+      .split('-')
+      .filter(part => !['test', 'failed', '1', browser].includes(part)) // 불필요한 부분 제거
+      .join('-');
+
     const fileName = `${testName}-${browser}.png`;
 
     const { upload_url, file_id } = await this.client.files.getUploadURLExternal({
@@ -59,7 +71,7 @@ class SlackNotifier {
 
   static collectFailedTests(suite) {
     const results = [];
-    
+
     const processTest = (test, parentTitle = '') => {
       if (test.status === 'failed' || test.status === 'unexpected') {
         const testTitle = test.title || parentTitle;
@@ -94,8 +106,8 @@ class SlackNotifier {
   }
 
   async sendTestResults(reportPath) {
-    const absoluteReportPath = path.isAbsolute(reportPath) 
-      ? reportPath 
+    const absoluteReportPath = path.isAbsolute(reportPath)
+      ? reportPath
       : path.join(process.env.GITHUB_WORKSPACE, reportPath);
 
     if (!fs.existsSync(absoluteReportPath)) {
@@ -147,7 +159,7 @@ class SlackNotifier {
 async function main() {
   try {
     console.log('🚀 Slack 알림 시스템 시작');
-    
+
     const notifier = new SlackNotifier(
       process.env.SLACK_BOT_TOKEN,
       process.env.SLACK_CHANNEL_ID
