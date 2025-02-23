@@ -82,22 +82,24 @@ function findScreenshotFiles(dir) {
   return results;
 }
 
-// 재귀적으로 실패한 테스트 케이스 제목을 수집하는 함수
+// 재귀적으로 실패한 테스트 케이스 제목과 브라우저 타입을 수집하는 함수
 function collectFailedTests(suite, resultsArr) {
   // specs 배열 처리: 각 spec은 테스트 케이스 정보를 담고 있음
   if (suite.specs) {
     suite.specs.forEach(spec => {
-      // spec 자체의 상태가 실패이면 추가
-      if (spec.status === 'failed' || spec.status === 'unexpected') {
-        resultsArr.push(`- ${spec.title}`);
-      }
-      // spec 내부에 tests 배열이 있는 경우 체크
       if (spec.tests) {
         spec.tests.forEach(test => {
           if (test.status === 'failed' || test.status === 'unexpected') {
-            resultsArr.push(`- ${spec.title} ▶ ${Array.isArray(test.title) ? test.title.join(' ▶ ') : test.title}`);
+            // 브라우저 타입은 test.projectName 에서 가져옵니다.
+            const projectName = test.projectName || 'Unknown Browser';
+            resultsArr.push(`- ${spec.title} ▶ ${projectName}`);
           }
         });
+      } else {
+        // specs 에 tests 배열이 없고, spec 자체가 실패 상태라면 추가
+        if (spec.status === 'failed' || spec.status === 'unexpected') {
+          resultsArr.push(`- ${spec.title}`);
+        }
       }
     });
   }
@@ -105,7 +107,8 @@ function collectFailedTests(suite, resultsArr) {
   if (suite.tests) {
     suite.tests.forEach(test => {
       if (test.status === 'failed' || test.status === 'unexpected') {
-        resultsArr.push(`- ${Array.isArray(test.title) ? test.title.join(' ▶ ') : test.title}`);
+        const projectName = test.projectName || 'Unknown Browser';
+        resultsArr.push(`- ${Array.isArray(test.title) ? test.title.join(' ▶ ') : test.title || 'Unnamed Test'} ▶ ${projectName}`);
       }
       if (test.suites) {
         collectFailedTests(test, resultsArr);
@@ -141,7 +144,6 @@ async function main() {
     const failed = results.stats.unexpected || 0;
 
     let failedTestsDetails = [];
-
     if (results.suites) {
       results.suites.forEach(suite => collectFailedTests(suite, failedTestsDetails));
     }
