@@ -23,7 +23,13 @@ class SlackNotifier {
     if (!fs.existsSync(absolutePath)) throw new Error(`파일이 존재하지 않음: ${absolutePath}`);
 
     const fileContent = fs.readFileSync(absolutePath);
-    const fileName = `${path.basename(path.dirname(absolutePath))}-${path.basename(absolutePath)}`;
+    
+    // 파일명 간소화
+    const dirName = path.basename(path.dirname(absolutePath));
+    const origFileName = path.basename(absolutePath);
+    const browser = origFileName.match(/(chromium|firefox|webkit)/i)?.[0] || 'unknown';
+    const testName = dirName.split('-').slice(0, -1).join('-'); // 'test-' 접두사 제거
+    const fileName = `${testName}-${browser}.png`;
 
     const { upload_url, file_id } = await this.client.files.getUploadURLExternal({
       filename: fileName,
@@ -53,29 +59,37 @@ class SlackNotifier {
 
   static collectFailedTests(suite) {
     const results = [];
-    const processTests = (tests, projectName = 'Unknown Browser') => {
-      tests.forEach(test => {
-        if (test.status === 'failed' || test.status === 'unexpected') {
-          const title = Array.isArray(test.title) ? test.title.join(' ▶ ') : test.title;
-          results.push(`- ${title} ▶ ${test.projectName || projectName}`);
-        }
-      });
+    
+    const processTest = (test, parentTitle = '') => {
+      if (test.status === 'failed' || test.status === 'unexpected') {
+        const testTitle = test.title || parentTitle;
+        const browser = test.projectName || 'Unknown Browser';
+        // 테스트 제목과 브라우저 정보를 결합
+        results.push(`- ${testTitle} ${browser}`);
+      }
     };
 
-    if (suite.specs) {
-      suite.specs.forEach(spec => {
-        if (spec.tests) processTests(spec.tests);
-        else if (spec.status === 'failed' || spec.status === 'unexpected') {
-          results.push(`- ${spec.title}`);
-        }
-      });
-    }
+    const processSpec = (spec, parentTitle = '') => {
+      if (spec.tests) {
+        spec.tests.forEach(test => processTest(test, spec.title || parentTitle));
+      } else if (spec.status === 'failed' || spec.status === 'unexpected') {
+        results.push(`- ${spec.title || 'Unnamed Test'}`);
+      }
+    };
 
-    if (suite.tests) processTests(suite.tests);
-    if (suite.suites) suite.suites.forEach(subSuite => {
-      results.push(...this.collectFailedTests(subSuite));
-    });
+    const processSuite = (currentSuite) => {
+      if (currentSuite.specs) {
+        currentSuite.specs.forEach(spec => processSpec(spec, currentSuite.title));
+      }
+      if (currentSuite.tests) {
+        currentSuite.tests.forEach(test => processTest(test, currentSuite.title));
+      }
+      if (currentSuite.suites) {
+        currentSuite.suites.forEach(subSuite => processSuite(subSuite));
+      }
+    };
 
+    processSuite(suite);
     return results;
   }
 
@@ -99,10 +113,8 @@ class SlackNotifier {
       `• 실패: ${unexpected}`,
     ];
 
-    if (unexpected > 0) {
-      const failedTests = results.suites
-        ? results.suites.flatMap(suite => SlackNotifier.collectFailedTests(suite))
-        : [];
+    if (unexpected > 0 && results.suites) {
+      const failedTests = results.suites.flatMap(suite => SlackNotifier.collectFailedTests(suite));
       if (failedTests.length) {
         message.push('\n*❌ 실패 케이스:*', ...failedTests);
       }
