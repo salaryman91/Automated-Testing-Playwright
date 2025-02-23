@@ -28,31 +28,25 @@ class SlackNotifier {
 
   static findScreenshotFiles(dir) {
     if (!fs.existsSync(dir)) return [];
-    // 재귀적 파일 검색이 필요하다면 별도의 로직 추가 필요
     return fs.readdirSync(dir)
       .filter(file => typeof file === 'string' && file.toLowerCase().endsWith('.png'))
       .map(file => path.join(dir, file));
   }
 
-  // 상위 스위트 체인을 포함하여 실패 테스트 정보를 수집
-  static collectFailedTests(suite, parentChain = []) {
+  // 단순하게 파일명, 테스트명, 브라우저 정보만 포함하도록 변경
+  static collectFailedTests(suite) {
     const results = [];
-    const chain = [...parentChain];
-    if (suite.file) {
-      chain.push(suite.file);
-    } else if (suite.title) {
-      chain.push(suite.title);
-    }
-
+    // 현재 스위트의 file 값 (없으면 빈 문자열)
+    const fileName = suite.file || '';
+    
     if (suite.specs) {
       suite.specs.forEach(spec => {
-        const specChain = [...chain];
-        if (spec.title) specChain.push(spec.title);
         if (spec.tests) {
           spec.tests.forEach(test => {
             if (test.status === 'failed' || test.status === 'unexpected') {
-              const fullName = [...specChain, test.title, test.projectName || 'Unknown Browser'].join(' ');
-              results.push({ fullName, testName: test.title, browser: test.projectName || 'Unknown Browser' });
+              results.push({
+                fullName: `${fileName} ${test.title} ${test.projectName || 'unknown'}`
+              });
             }
           });
         }
@@ -62,15 +56,16 @@ class SlackNotifier {
     if (suite.tests) {
       suite.tests.forEach(test => {
         if (test.status === 'failed' || test.status === 'unexpected') {
-          const fullName = [...chain, test.title, test.projectName || 'Unknown Browser'].join(' ');
-          results.push({ fullName, testName: test.title, browser: test.projectName || 'Unknown Browser' });
+          results.push({
+            fullName: `${fileName} ${test.title} ${test.projectName || 'unknown'}`
+          });
         }
       });
     }
 
     if (suite.suites) {
       suite.suites.forEach(subSuite => {
-        results.push(...SlackNotifier.collectFailedTests(subSuite, chain));
+        results.push(...SlackNotifier.collectFailedTests(subSuite));
       });
     }
     return results;
@@ -140,7 +135,7 @@ class SlackNotifier {
       return null;
     }
 
-    // fullName에서 공백을 하이픈(-)으로 치환해 파일명 생성
+    // fullName에서 공백을 하이픈(-)으로 치환하여 파일명 생성
     const fileName = `${failedTest.replace(/ /g, '-')}.png`;
 
     const { upload_url, file_id } = await this.client.files.getUploadURLExternal({
