@@ -10,7 +10,7 @@ class SlackNotifier {
     }
     this.client = new WebClient(token);
     this.channelId = channelId;
-    this.failedTests = new Set(); // 실패한 테스트 케이스 저장
+    this.failedTests = new Set();
   }
 
   async validateChannel() {
@@ -97,7 +97,6 @@ class SlackNotifier {
     if (unexpected > 0 && results.suites) {
       const failedTests = results.suites.flatMap(suite => SlackNotifier.collectFailedTests(suite));
       if (failedTests.length) {
-        // 실패한 테스트 정보 저장
         failedTests.forEach(test => {
           this.failedTests.add(`${test.testName}-${test.browser.toLowerCase()}`);
         });
@@ -127,13 +126,11 @@ class SlackNotifier {
 
     const fileContent = fs.readFileSync(absolutePath);
     
-    // 브라우저 정보 추출
     let browser = 'unknown';
     if (absolutePath.includes('chromium')) browser = 'chromium';
     else if (absolutePath.includes('firefox')) browser = 'firefox';
     else if (absolutePath.includes('webkit')) browser = 'webkit';
 
-    // 실패한 테스트 케이스 찾기
     const failedTest = Array.from(this.failedTests)
       .find(test => test.includes(browser));
 
@@ -142,11 +139,9 @@ class SlackNotifier {
       return null;
     }
 
-    // 테스트 이름 추출 (browser 부분 제거)
     const testName = failedTest.replace(`-${browser}`, '');
     const fileName = `${testName}-${browser}.png`;
 
-    // Slack에 파일 업로드
     const { upload_url, file_id } = await this.client.files.getUploadURLExternal({
       filename: fileName,
       length: fileContent.length,
