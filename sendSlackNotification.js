@@ -28,55 +28,57 @@ class SlackNotifier {
 
   static findScreenshotFiles(dir) {
     if (!fs.existsSync(dir)) return [];
-    return fs.readdirSync(dir, { recursive: true })
+    // 재귀적 파일 검색이 필요하다면 별도의 로직 추가 필요
+    return fs.readdirSync(dir)
       .filter(file => typeof file === 'string' && file.toLowerCase().endsWith('.png'))
       .map(file => path.join(dir, file));
   }
 
-  static collectFailedTests(suite) {
+  // 상위 스위트 체인을 포함하여 실패 테스트 정보를 수집
+  static collectFailedTests(suite, parentChain = []) {
     const results = [];
-    
-    const processTest = (test, parentTitle = '') => {
-      if (test.status === 'failed' || test.status === 'unexpected') {
-        const testTitle = test.title || parentTitle;
-        const browser = test.projectName || 'Unknown Browser';
-        results.push({
-          testName: testTitle,
-          browser: browser
-        });
-      }
-    };
+    const chain = [...parentChain];
+    if (suite.file) {
+      chain.push(suite.file);
+    } else if (suite.title) {
+      chain.push(suite.title);
+    }
 
-    const processSpec = (spec, parentTitle = '') => {
-      if (spec.tests) {
-        spec.tests.forEach(test => processTest(test, spec.title || parentTitle));
-      } else if (spec.status === 'failed' || spec.status === 'unexpected') {
-        results.push({
-          testName: spec.title || 'Unnamed Test',
-          browser: 'Unknown Browser'
-        });
-      }
-    };
+    if (suite.specs) {
+      suite.specs.forEach(spec => {
+        const specChain = [...chain];
+        if (spec.title) specChain.push(spec.title);
+        if (spec.tests) {
+          spec.tests.forEach(test => {
+            if (test.status === 'failed' || test.status === 'unexpected') {
+              const fullName = [...specChain, test.title, test.projectName || 'Unknown Browser'].join(' ');
+              results.push({ fullName, testName: test.title, browser: test.projectName || 'Unknown Browser' });
+            }
+          });
+        }
+      });
+    }
 
-    const processSuite = (currentSuite) => {
-      if (currentSuite.specs) {
-        currentSuite.specs.forEach(spec => processSpec(spec, currentSuite.title));
-      }
-      if (currentSuite.tests) {
-        currentSuite.tests.forEach(test => processTest(test, currentSuite.title));
-      }
-      if (currentSuite.suites) {
-        currentSuite.suites.forEach(subSuite => processSuite(subSuite));
-      }
-    };
+    if (suite.tests) {
+      suite.tests.forEach(test => {
+        if (test.status === 'failed' || test.status === 'unexpected') {
+          const fullName = [...chain, test.title, test.projectName || 'Unknown Browser'].join(' ');
+          results.push({ fullName, testName: test.title, browser: test.projectName || 'Unknown Browser' });
+        }
+      });
+    }
 
-    processSuite(suite);
+    if (suite.suites) {
+      suite.suites.forEach(subSuite => {
+        results.push(...SlackNotifier.collectFailedTests(subSuite, chain));
+      });
+    }
     return results;
   }
 
   async sendTestResults(reportPath) {
-    const absoluteReportPath = path.isAbsolute(reportPath) 
-      ? reportPath 
+    const absoluteReportPath = path.isAbsolute(reportPath)
+      ? reportPath
       : path.join(process.env.GITHUB_WORKSPACE, reportPath);
 
     if (!fs.existsSync(absoluteReportPath)) {
@@ -98,11 +100,10 @@ class SlackNotifier {
       const failedTests = results.suites.flatMap(suite => SlackNotifier.collectFailedTests(suite));
       if (failedTests.length) {
         failedTests.forEach(test => {
-          this.failedTests.add(`${test.testName}-${test.browser.toLowerCase()}`);
+          this.failedTests.add(test.fullName);
         });
-        
         message.push('\n*❌ 실패 케이스:*', 
-          ...failedTests.map(test => `- ${test.testName} ${test.browser}`));
+          ...failedTests.map(test => `- ${test.fullName}`));
       }
     }
 
@@ -116,8 +117,8 @@ class SlackNotifier {
   }
 
   async uploadScreenshot(filePath) {
-    const absolutePath = path.isAbsolute(filePath) 
-      ? filePath 
+    const absolutePath = path.isAbsolute(filePath)
+      ? filePath
       : path.join(process.env.GITHUB_WORKSPACE, filePath);
 
     if (!fs.existsSync(absolutePath)) {
@@ -125,22 +126,22 @@ class SlackNotifier {
     }
 
     const fileContent = fs.readFileSync(absolutePath);
-    
+
     let browser = 'unknown';
     if (absolutePath.includes('chromium')) browser = 'chromium';
     else if (absolutePath.includes('firefox')) browser = 'firefox';
     else if (absolutePath.includes('webkit')) browser = 'webkit';
 
     const failedTest = Array.from(this.failedTests)
-      .find(test => test.includes(browser));
+      .find(test => test.toLowerCase().includes(browser));
 
     if (!failedTest) {
       console.log(`⚠️ 매칭되는 실패 케이스를 찾을 수 없음: ${absolutePath}`);
       return null;
     }
 
-    const testName = failedTest.replace(`-${browser}`, '');
-    const fileName = `${testName}-${browser}.png`;
+    // fullName에서 공백을 하이픈(-)으로 치환해 파일명 생성
+    const fileName = `${failedTest.replace(/ /g, '-')}.png`;
 
     const { upload_url, file_id } = await this.client.files.getUploadURLExternal({
       filename: fileName,
@@ -181,7 +182,7 @@ class SlackNotifier {
 async function main() {
   try {
     console.log('🚀 Slack 알림 시스템 시작');
-    
+
     const notifier = new SlackNotifier(
       process.env.SLACK_BOT_TOKEN,
       process.env.SLACK_CHANNEL_ID
