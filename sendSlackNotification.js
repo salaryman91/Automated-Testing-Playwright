@@ -15,9 +15,7 @@ class SlackNotifier {
 
   async validateChannel() {
     try {
-      const { channel } = await this.client.conversations.info({ 
-        channel: this.channelId 
-      });
+      const { channel } = await this.client.conversations.info({ channel: this.channelId });
       if (!channel) throw new Error('채널 정보 없음');
       console.log(`🔍 채널 검증 성공: #${channel.name}`);
     } catch (error) {
@@ -33,19 +31,21 @@ class SlackNotifier {
       .map(file => path.join(dir, file));
   }
 
-  // 단순하게 파일명, 테스트명, 브라우저 정보만 포함하도록 변경
-  static collectFailedTests(suite) {
+  // 부모 스위트의 제목을 fallback하여, file, test title, browser 정보를 구성
+  static collectFailedTests(suite, parentTitle = '') {
     const results = [];
-    // 현재 스위트의 file 값 (없으면 빈 문자열)
-    const fileName = suite.file || '';
-    
+    const fileName = suite.file || ''; // 파일명이 없으면 빈 문자열
+    const currentTitle = suite.title || parentTitle;
+
     if (suite.specs) {
       suite.specs.forEach(spec => {
+        const specTitle = spec.title || currentTitle;
         if (spec.tests) {
           spec.tests.forEach(test => {
             if (test.status === 'failed' || test.status === 'unexpected') {
+              const testTitle = test.title || specTitle || 'test';
               results.push({
-                fullName: `${fileName} ${test.title} ${test.projectName || 'unknown'}`
+                fullName: `${fileName} ${testTitle} ${test.projectName || 'unknown'}`
               });
             }
           });
@@ -56,8 +56,9 @@ class SlackNotifier {
     if (suite.tests) {
       suite.tests.forEach(test => {
         if (test.status === 'failed' || test.status === 'unexpected') {
+          const testTitle = test.title || currentTitle || 'test';
           results.push({
-            fullName: `${fileName} ${test.title} ${test.projectName || 'unknown'}`
+            fullName: `${fileName} ${testTitle} ${test.projectName || 'unknown'}`
           });
         }
       });
@@ -65,7 +66,7 @@ class SlackNotifier {
 
     if (suite.suites) {
       suite.suites.forEach(subSuite => {
-        results.push(...SlackNotifier.collectFailedTests(subSuite));
+        results.push(...SlackNotifier.collectFailedTests(subSuite, currentTitle));
       });
     }
     return results;
