@@ -22,7 +22,7 @@ async function validateChannel() {
   }
 }
 
-// 스크린샷 파일 업로드 함수 (파일명 재가공 적용)
+// 스크린샷 파일 업로드 함수
 async function uploadScreenshot(filePath) {
   try {
     // 파일 경로가 존재하지 않으면 절대 경로로 변환
@@ -32,18 +32,8 @@ async function uploadScreenshot(filePath) {
     if (!fs.existsSync(filePath)) throw new Error('파일이 존재하지 않음: ' + filePath);
 
     const fileContent = fs.readFileSync(filePath);
-    const originalName = path.basename(filePath); // 예: test-naver-access-test-fail-test-firefox-test-failed-1.png
-    let fileName;
-
-    // 정규표현식을 사용하여 "test-" 접두어와 "-test-failed" 이후 부분을 제거합니다.
-    const regex = /^test-(.*?)-test-failed.*\.png$/;
-    const match = originalName.match(regex);
-    if (match) {
-      fileName = `${match[1]}.png`; // 예: "naver-access-test-fail-test-firefox.png"
-    } else {
-      // 패턴이 맞지 않으면 원본 파일명 사용 (또는 추가 처리 가능)
-      fileName = originalName;
-    }
+    const parentFolder = path.basename(path.dirname(filePath));
+    const fileName = `${parentFolder}-${path.basename(filePath)}`;
 
     console.log(`📤 업로드 시도: ${fileName} (${(fileContent.length / 1024).toFixed(2)}KB)`);
 
@@ -75,6 +65,7 @@ async function uploadScreenshot(filePath) {
 }
 
 // 재귀적으로 스크린샷 파일을 찾는 함수
+// test-results 폴더 내의 하위 폴더에서도 .png 파일을 찾아 반환합니다.
 function findScreenshotFiles(dir) {
   let results = [];
   if (!fs.existsSync(dir)) return results;
@@ -89,6 +80,42 @@ function findScreenshotFiles(dir) {
     }
   }
   return results;
+}
+
+// 재귀적으로 실패한 테스트 케이스 제목을 수집하는 함수
+function collectFailedTests(suite, resultsArr) {
+  // specs 배열 처리: 각 spec은 테스트 케이스 정보를 담고 있음
+  if (suite.specs) {
+    suite.specs.forEach(spec => {
+      // spec 자체의 상태가 실패이면 추가
+      if (spec.status === 'failed' || spec.status === 'unexpected') {
+        resultsArr.push(`- ${spec.title}`);
+      }
+      // spec 내부에 tests 배열이 있는 경우 체크
+      if (spec.tests) {
+        spec.tests.forEach(test => {
+          if (test.status === 'failed' || test.status === 'unexpected') {
+            resultsArr.push(`- ${spec.title} ▶ ${Array.isArray(test.title) ? test.title.join(' ▶ ') : test.title}`);
+          }
+        });
+      }
+    });
+  }
+  // suite 자체에 tests 배열이 있는 경우 처리
+  if (suite.tests) {
+    suite.tests.forEach(test => {
+      if (test.status === 'failed' || test.status === 'unexpected') {
+        resultsArr.push(`- ${Array.isArray(test.title) ? test.title.join(' ▶ ') : test.title}`);
+      }
+      if (test.suites) {
+        collectFailedTests(test, resultsArr);
+      }
+    });
+  }
+  // 하위 suite 처리
+  if (suite.suites) {
+    suite.suites.forEach(subSuite => collectFailedTests(subSuite, resultsArr));
+  }
 }
 
 // 테스트 결과를 Slack으로 전송하는 메인 함수
@@ -115,19 +142,6 @@ async function main() {
 
     let failedTestsDetails = [];
 
-    // 재귀적으로 실패한 테스트 케이스 제목을 수집하는 함수
-    function collectFailedTests(suite, resultsArr) {
-      if (suite.tests) {
-        suite.tests.forEach(test => {
-          if (test.status === 'failed' || test.status === 'unexpected') {
-            const title = Array.isArray(test.title) ? test.title.join(' ▶ ') : test.title;
-            resultsArr.push(`- ${title}`);
-          }
-          if (test.suites) collectFailedTests(test, resultsArr);
-        });
-      }
-    }
-
     if (results.suites) {
       results.suites.forEach(suite => collectFailedTests(suite, failedTestsDetails));
     }
@@ -147,7 +161,7 @@ async function main() {
       mrkdwn: true,
     });
 
-    // test-results 디렉토리에서 스크린샷 파일 경로를 수집합니다.
+    // test-results 디렉토리에서 스크린샷 파일 경로 수집
     const screenshotsDir = path.join(process.env.GITHUB_WORKSPACE, 'test-results');
     const screenshotPaths = findScreenshotFiles(screenshotsDir);
 
