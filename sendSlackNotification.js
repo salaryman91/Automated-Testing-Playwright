@@ -22,7 +22,7 @@ async function validateChannel() {
   }
 }
 
-// 스크린샷 파일 업로드 함수
+// 스크린샷 파일 업로드 함수 (파일명 재가공 적용)
 async function uploadScreenshot(filePath) {
   try {
     // 파일 경로가 존재하지 않으면 절대 경로로 변환
@@ -32,9 +32,22 @@ async function uploadScreenshot(filePath) {
     if (!fs.existsSync(filePath)) throw new Error('파일이 존재하지 않음: ' + filePath);
 
     const fileContent = fs.readFileSync(filePath);
-    const parentFolder = path.basename(path.dirname(filePath));
-    const fileName = `${parentFolder}-${path.basename(filePath)}`;
+    const originalName = path.basename(filePath); // 예: test-naver-access-test-fail-test-firefox-test-failed-1.png
+    let fileName;
 
+    // "-test-" 구분자로 분리하여 테스트 명, 실패 케이스, 브라우저명을 추출
+    const parts = originalName.split("-test-");
+    if (parts.length >= 3) {
+      const suiteName = parts[0].replace(/^test-/, ""); // 예: "naver-access"
+      const failedTestCase = parts[1];                   // 예: "fail"
+      const browserName = parts[2];                      // 예: "firefox"
+      fileName = `${suiteName} - ${failedTestCase} - ${browserName}.png`;
+    } else {
+      // 패턴이 맞지 않으면 브라우저 정보만 추출하는 폴백 방식
+      const browserMatch = originalName.match(/-(firefox|chromium|webkit)-/);
+      const browserType = browserMatch ? browserMatch[1] : 'unknown';
+      fileName = `unknown - unknown - ${browserType}.png`;
+    }
 
     console.log(`📤 업로드 시도: ${fileName} (${(fileContent.length / 1024).toFixed(2)}KB)`);
 
