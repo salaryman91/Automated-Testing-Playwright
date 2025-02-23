@@ -24,14 +24,23 @@ class SlackNotifier {
     }
   }
 
+  // 재귀적으로 스크린샷 파일(.png)을 찾도록 수정
   static findScreenshotFiles(dir) {
     if (!fs.existsSync(dir)) return [];
-    return fs.readdirSync(dir)
-      .filter(file => typeof file === 'string' && file.toLowerCase().endsWith('.png'))
-      .map(file => path.join(dir, file));
+    let results = [];
+    const files = fs.readdirSync(dir);
+    files.forEach(file => {
+      const fullPath = path.join(dir, file);
+      if (fs.statSync(fullPath).isDirectory()) {
+        results = results.concat(SlackNotifier.findScreenshotFiles(fullPath));
+      } else if (file.toLowerCase().endsWith('.png')) {
+        results.push(fullPath);
+      }
+    });
+    return results;
   }
 
-  // 부모 스위트의 제목을 fallback하여, file, test title, browser 정보를 구성
+  // 부모 스위트의 제목을 fallback하여, file, test title, 브라우저 정보를 구성
   static collectFailedTests(suite, parentTitle = '') {
     const results = [];
     const fileName = suite.file || ''; // 파일명이 없으면 빈 문자열
