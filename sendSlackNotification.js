@@ -10,66 +10,40 @@ class SlackNotifier {
     }
     this.client = new WebClient(token);
     this.channelId = channelId;
+    this.failedTests = new Set(); // 실패한 테스트 케이스 저장
   }
 
   async validateChannel() {
-    const { channel } = await this.client.conversations.info({ channel: this.channelId });
-    if (!channel) throw new Error('채널 정보 없음');
-    console.log(`🔍 채널 검증 성공: #${channel.name}`);
-  }
-
-  async uploadScreenshot(filePath) {
-    const absolutePath = path.isAbsolute(filePath) ? filePath : path.join(process.env.GITHUB_WORKSPACE, filePath);
-    if (!fs.existsSync(absolutePath)) throw new Error(`파일이 존재하지 않음: ${absolutePath}`);
-
-    const fileContent = fs.readFileSync(absolutePath);
-
-    // 브라우저 정보 추출
-    let browser = 'unknown';
-    if (absolutePath.includes('chromium')) browser = 'chromium';
-    else if (absolutePath.includes('firefox')) browser = 'firefox';
-    else if (absolutePath.includes('webkit')) browser = 'webkit';
-
-    // 테스트 케이스 이름 추출 (fail_test 또는 pass_test)
-    const testCase = absolutePath.includes('fail_test') ? 'fail_test' : 'pass_test';
-
-    const fileName = `${testCase}-${browser}.png`;
-
-    const { upload_url, file_id } = await this.client.files.getUploadURLExternal({
-      filename: fileName,
-      length: fileContent.length,
-    });
-
-    await axios.post(upload_url, fileContent, {
-      headers: { 'Content-Type': 'application/octet-stream' },
-    });
-
-    await this.client.files.completeUploadExternal({
-      files: [{ id: file_id, title: fileName }],
-      channel_id: this.channelId,
-      initial_comment: `📸 실패 스크린샷: ${fileName}`,
-    });
-
-    console.log(`✅ 업로드 성공: ${fileName}`);
-    return file_id;
+    try {
+      const { channel } = await this.client.conversations.info({ 
+        channel: this.channelId 
+      });
+      if (!channel) throw new Error('채널 정보 없음');
+      console.log(`🔍 채널 검증 성공: #${channel.name}`);
+    } catch (error) {
+      console.error('❌ 채널 검증 실패:', error.message);
+      throw error;
+    }
   }
 
   static findScreenshotFiles(dir) {
     if (!fs.existsSync(dir)) return [];
     return fs.readdirSync(dir, { recursive: true })
-      .filter(file => file.toLowerCase().endsWith('.png'))
+      .filter(file => typeof file === 'string' && file.toLowerCase().endsWith('.png'))
       .map(file => path.join(dir, file));
   }
 
   static collectFailedTests(suite) {
     const results = [];
-
+    
     const processTest = (test, parentTitle = '') => {
       if (test.status === 'failed' || test.status === 'unexpected') {
         const testTitle = test.title || parentTitle;
         const browser = test.projectName || 'Unknown Browser';
-        // 테스트 제목과 브라우저 정보를 결합
-        results.push(`- ${testTitle} ${browser}`);
+        results.push({
+          testName: testTitle,
+          browser: browser
+        });
       }
     };
 
@@ -77,7 +51,10 @@ class SlackNotifier {
       if (spec.tests) {
         spec.tests.forEach(test => processTest(test, spec.title || parentTitle));
       } else if (spec.status === 'failed' || spec.status === 'unexpected') {
-        results.push(`- ${spec.title || 'Unnamed Test'}`);
+        results.push({
+          testName: spec.title || 'Unnamed Test',
+          browser: 'Unknown Browser'
+        });
       }
     };
 
@@ -98,8 +75,8 @@ class SlackNotifier {
   }
 
   async sendTestResults(reportPath) {
-    const absoluteReportPath = path.isAbsolute(reportPath)
-      ? reportPath
+    const absoluteReportPath = path.isAbsolute(reportPath) 
+      ? reportPath 
       : path.join(process.env.GITHUB_WORKSPACE, reportPath);
 
     if (!fs.existsSync(absoluteReportPath)) {
@@ -120,7 +97,13 @@ class SlackNotifier {
     if (unexpected > 0 && results.suites) {
       const failedTests = results.suites.flatMap(suite => SlackNotifier.collectFailedTests(suite));
       if (failedTests.length) {
-        message.push('\n*❌ 실패 케이스:*', ...failedTests);
+        // 실패한 테스트 정보 저장
+        failedTests.forEach(test => {
+          this.failedTests.add(`${test.testName}-${test.browser.toLowerCase()}`);
+        });
+        
+        message.push('\n*❌ 실패 케이스:*', 
+          ...failedTests.map(test => `- ${test.testName} ${test.browser}`));
       }
     }
 
@@ -133,6 +116,56 @@ class SlackNotifier {
     return unexpected;
   }
 
+  async uploadScreenshot(filePath) {
+    const absolutePath = path.isAbsolute(filePath) 
+      ? filePath 
+      : path.join(process.env.GITHUB_WORKSPACE, filePath);
+
+    if (!fs.existsSync(absolutePath)) {
+      throw new Error(`파일이 존재하지 않음: ${absolutePath}`);
+    }
+
+    const fileContent = fs.readFileSync(absolutePath);
+    
+    // 브라우저 정보 추출
+    let browser = 'unknown';
+    if (absolutePath.includes('chromium')) browser = 'chromium';
+    else if (absolutePath.includes('firefox')) browser = 'firefox';
+    else if (absolutePath.includes('webkit')) browser = 'webkit';
+
+    // 실패한 테스트 케이스 찾기
+    const failedTest = Array.from(this.failedTests)
+      .find(test => test.includes(browser));
+
+    if (!failedTest) {
+      console.log(`⚠️ 매칭되는 실패 케이스를 찾을 수 없음: ${absolutePath}`);
+      return null;
+    }
+
+    // 테스트 이름 추출 (browser 부분 제거)
+    const testName = failedTest.replace(`-${browser}`, '');
+    const fileName = `${testName}-${browser}.png`;
+
+    // Slack에 파일 업로드
+    const { upload_url, file_id } = await this.client.files.getUploadURLExternal({
+      filename: fileName,
+      length: fileContent.length,
+    });
+
+    await axios.post(upload_url, fileContent, {
+      headers: { 'Content-Type': 'application/octet-stream' },
+    });
+
+    await this.client.files.completeUploadExternal({
+      files: [{ id: file_id, title: fileName }],
+      channel_id: this.channelId,
+      initial_comment: `📸 실패 스크린샷: ${fileName}`,
+    });
+
+    console.log(`✅ 업로드 성공: ${fileName}`);
+    return file_id;
+  }
+
   async processScreenshots(screenshotsDir) {
     const screenshots = SlackNotifier.findScreenshotFiles(screenshotsDir);
     if (screenshots.length === 0) {
@@ -142,8 +175,10 @@ class SlackNotifier {
 
     console.log(`🔄 실패 스크린샷 처리 시작 (${screenshots.length}개)`);
     for (const screenshot of screenshots) {
-      await this.uploadScreenshot(screenshot);
-      console.log(`🖼️ ${path.basename(screenshot)} 처리 완료`);
+      const fileId = await this.uploadScreenshot(screenshot);
+      if (fileId) {
+        console.log(`🖼️ ${path.basename(screenshot)} 처리 완료`);
+      }
     }
   }
 }
@@ -151,7 +186,7 @@ class SlackNotifier {
 async function main() {
   try {
     console.log('🚀 Slack 알림 시스템 시작');
-
+    
     const notifier = new SlackNotifier(
       process.env.SLACK_BOT_TOKEN,
       process.env.SLACK_CHANNEL_ID
@@ -163,7 +198,9 @@ async function main() {
     const failedTests = await notifier.sendTestResults(reportPath);
 
     if (failedTests > 0) {
-      await notifier.processScreenshots(path.join(process.env.GITHUB_WORKSPACE, 'test-results'));
+      await notifier.processScreenshots(
+        path.join(process.env.GITHUB_WORKSPACE, 'test-results')
+      );
     }
 
     console.log('🎉 모든 작업 완료');
