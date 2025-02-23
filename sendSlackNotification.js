@@ -35,18 +35,14 @@ async function uploadScreenshot(filePath) {
     const originalName = path.basename(filePath); // 예: test-naver-access-test-fail-test-firefox-test-failed-1.png
     let fileName;
 
-    // "-test-" 구분자로 분리하여 테스트 명, 실패 케이스, 브라우저명을 추출
-    const parts = originalName.split("-test-");
-    if (parts.length >= 3) {
-      const suiteName = parts[0].replace(/^test-/, ""); // 예: "naver-access"
-      const failedTestCase = parts[1];                   // 예: "fail"
-      const browserName = parts[2];                      // 예: "firefox"
-      fileName = `${suiteName} - ${failedTestCase} - ${browserName}.png`;
+    // 정규표현식을 사용하여 "test-" 접두어와 "-test-failed" 이후 부분을 제거합니다.
+    const regex = /^test-(.*?)-test-failed.*\.png$/;
+    const match = originalName.match(regex);
+    if (match) {
+      fileName = `${match[1]}.png`; // 예: "naver-access-test-fail-test-firefox.png"
     } else {
-      // 패턴이 맞지 않으면 브라우저 정보만 추출하는 폴백 방식
-      const browserMatch = originalName.match(/-(firefox|chromium|webkit)-/);
-      const browserType = browserMatch ? browserMatch[1] : 'unknown';
-      fileName = `unknown - unknown - ${browserType}.png`;
+      // 패턴이 맞지 않으면 원본 파일명 사용 (또는 추가 처리 가능)
+      fileName = originalName;
     }
 
     console.log(`📤 업로드 시도: ${fileName} (${(fileContent.length / 1024).toFixed(2)}KB)`);
@@ -79,7 +75,6 @@ async function uploadScreenshot(filePath) {
 }
 
 // 재귀적으로 스크린샷 파일을 찾는 함수
-// test-results 폴더 내의 하위 폴더(예: 실패 테스트 이름으로 생성된 폴더)에서도 .png 파일을 찾아 반환합니다.
 function findScreenshotFiles(dir) {
   let results = [];
   if (!fs.existsSync(dir)) return results;
