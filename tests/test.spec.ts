@@ -12,6 +12,6 @@ test.describe('naver access test', () => {
 
   test('fail_test', async ({ page }: { page: Page }) => {
     const url = page.url();
-    expect(url).toContain('daum');
+    expect(url).toContain('never');
   });
 });
